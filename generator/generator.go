@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/maxbrunsfeld/counterfeiter/model"
+	"github.com/matematik7/counterfeiter/model"
 
 	"golang.org/x/tools/imports"
 )
@@ -38,33 +38,11 @@ func (gen CodeGenerator) sourceFile() ast.Node {
 	}
 
 	for _, method := range gen.Model.Methods {
-		methodType := method.Type.(*ast.FuncType)
-
 		declarations = append(
 			declarations,
 			gen.methodImplementation(method),
-			gen.methodCallCountGetter(method),
 		)
-
-		if methodType.Params.NumFields() > 0 {
-			declarations = append(
-				declarations,
-				gen.methodCallArgsGetter(method),
-			)
-		}
-
-		if methodType.Results.NumFields() > 0 {
-			declarations = append(
-				declarations,
-				gen.methodReturnsSetter(method),
-			)
-		}
 	}
-
-	declarations = append(
-		declarations,
-		gen.ensureInterfaceIsUsed(),
-	)
 
 	return &ast.File{
 		Name:  &ast.Ident{Name: gen.PackageName},
@@ -78,12 +56,6 @@ func (gen CodeGenerator) imports() ast.Decl {
 			Path: &ast.BasicLit{
 				Kind:  token.STRING,
 				Value: `"` + gen.Model.ImportPath + `"`,
-			},
-		},
-		&ast.ImportSpec{
-			Path: &ast.BasicLit{
-				Kind:  token.STRING,
-				Value: `"sync"`,
 			},
 		},
 	}
@@ -102,44 +74,6 @@ func (gen CodeGenerator) imports() ast.Decl {
 func (gen CodeGenerator) fakeStructType() ast.Decl {
 	structFields := []*ast.Field{}
 
-	for _, method := range gen.Model.Methods {
-		methodType := method.Type.(*ast.FuncType)
-
-		structFields = append(
-			structFields,
-
-			&ast.Field{
-				Names: []*ast.Ident{ast.NewIdent(methodStubFuncName(method))},
-				Type:  method.Type,
-			},
-
-			&ast.Field{
-				Type: &ast.SelectorExpr{
-					X:   ast.NewIdent("sync"),
-					Sel: ast.NewIdent("RWMutex"),
-				},
-				Names: []*ast.Ident{ast.NewIdent(mutexFieldName(method))},
-			},
-
-			&ast.Field{
-				Names: []*ast.Ident{ast.NewIdent(callArgsFieldName(method))},
-				Type: &ast.ArrayType{
-					Elt: argsStructTypeForMethod(methodType),
-				},
-			},
-		)
-
-		if methodType.Results.NumFields() > 0 {
-			structFields = append(
-				structFields,
-				&ast.Field{
-					Names: []*ast.Ident{ast.NewIdent(returnStructFieldName(method))},
-					Type:  returnStructTypeForMethod(methodType),
-				},
-			)
-		}
-	}
-
 	return &ast.GenDecl{
 		Tok: token.TYPE,
 		Specs: []ast.Spec{
@@ -156,230 +90,30 @@ func (gen CodeGenerator) fakeStructType() ast.Decl {
 func (gen CodeGenerator) methodImplementation(method *ast.Field) *ast.FuncDecl {
 	methodType := method.Type.(*ast.FuncType)
 
-	stubFunc := &ast.SelectorExpr{
-		X:   receiverIdent(),
-		Sel: ast.NewIdent(methodStubFuncName(method)),
-	}
-
-	paramValues := []ast.Expr{}
-	paramFields := []*ast.Field{}
-	var ellipsisPos token.Pos
-
-	eachMethodParam(methodType, func(name string, t ast.Expr, i int) {
-		paramValues = append(paramValues, ast.NewIdent(name))
-
-		paramFields = append(paramFields, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(name)},
-			Type:  t,
-		})
-
-		if _, ok := t.(*ast.Ellipsis); ok {
-			ellipsisPos = token.Pos(i + 1)
-		}
-	})
-
-	stubFuncCall := &ast.CallExpr{
-		Fun:      stubFunc,
-		Args:     paramValues,
-		Ellipsis: ellipsisPos,
-	}
-
 	var lastStatement ast.Stmt
 	if methodType.Results.NumFields() > 0 {
 		returnValues := []ast.Expr{}
 		eachMethodResult(methodType, func(name string, t ast.Expr) {
-			returnValues = append(returnValues, &ast.SelectorExpr{
-				X: &ast.SelectorExpr{
-					X:   receiverIdent(),
-					Sel: ast.NewIdent(returnStructFieldName(method)),
-				},
-				Sel: ast.NewIdent(name),
+			returnValues = append(returnValues, &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: "nil",
 			})
 		})
 
-		lastStatement = &ast.IfStmt{
-			Cond: nilCheck(stubFunc),
-			Body: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.ReturnStmt{Results: []ast.Expr{stubFuncCall}},
-			}},
-			Else: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.ReturnStmt{Results: returnValues},
-			}},
-		}
+		lastStatement = &ast.ReturnStmt{Results: returnValues}
 	} else {
-		lastStatement = &ast.IfStmt{
-			Cond: nilCheck(stubFunc),
-			Body: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.ExprStmt{X: stubFuncCall},
-			}},
-		}
+		lastStatement = &ast.ReturnStmt{Results: nil}
 	}
 
 	return &ast.FuncDecl{
 		Name: method.Names[0],
 		Type: &ast.FuncType{
-			Params:  &ast.FieldList{List: paramFields},
+			Params:  methodType.Params,
 			Results: methodType.Results,
 		},
 		Recv: gen.receiverFieldList(),
 		Body: &ast.BlockStmt{List: []ast.Stmt{
-			callMutex(method, "Lock"),
-
-			&ast.AssignStmt{
-				Tok: token.ASSIGN,
-				Lhs: []ast.Expr{&ast.SelectorExpr{
-					X:   receiverIdent(),
-					Sel: ast.NewIdent(callArgsFieldName(method)),
-				}},
-				Rhs: []ast.Expr{&ast.CallExpr{
-					Fun: ast.NewIdent("append"),
-					Args: []ast.Expr{
-						&ast.SelectorExpr{
-							X:   receiverIdent(),
-							Sel: ast.NewIdent(callArgsFieldName(method)),
-						},
-						&ast.CompositeLit{
-							Type: argsStructTypeForMethod(methodType),
-							Elts: paramValues,
-						},
-					},
-				}},
-			},
-
-			callMutex(method, "Unlock"),
-
 			lastStatement,
-		}},
-	}
-}
-
-func (gen CodeGenerator) methodCallCountGetter(method *ast.Field) *ast.FuncDecl {
-	return &ast.FuncDecl{
-		Name: ast.NewIdent(callCountMethodName(method)),
-		Type: &ast.FuncType{
-			Results: &ast.FieldList{List: []*ast.Field{
-				&ast.Field{
-					Type: ast.NewIdent("int"),
-				},
-			}},
-		},
-		Recv: gen.receiverFieldList(),
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			callMutex(method, "RLock"),
-			deferMutex(method, "RUnlock"),
-
-			&ast.ReturnStmt{
-				Results: []ast.Expr{
-					&ast.CallExpr{
-						Fun: ast.NewIdent("len"),
-						Args: []ast.Expr{
-							&ast.SelectorExpr{
-								X:   receiverIdent(),
-								Sel: ast.NewIdent(callArgsFieldName(method)),
-							},
-						},
-					},
-				},
-			},
-		}},
-	}
-}
-
-func (gen CodeGenerator) methodCallArgsGetter(method *ast.Field) *ast.FuncDecl {
-	indexIdent := ast.NewIdent("i")
-	resultValues := []ast.Expr{}
-	resultTypes := []*ast.Field{}
-
-	eachMethodParam(method.Type.(*ast.FuncType), func(name string, t ast.Expr, _ int) {
-		resultValues = append(resultValues, &ast.SelectorExpr{
-			X: &ast.IndexExpr{
-				X: &ast.SelectorExpr{
-					X:   receiverIdent(),
-					Sel: ast.NewIdent(callArgsFieldName(method)),
-				},
-				Index: indexIdent,
-			},
-			Sel: ast.NewIdent(name),
-		})
-
-		resultTypes = append(resultTypes, &ast.Field{
-			Type: storedTypeForType(t),
-		})
-	})
-
-	return &ast.FuncDecl{
-		Name: ast.NewIdent(callArgsMethodName(method)),
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{List: []*ast.Field{
-				&ast.Field{
-					Names: []*ast.Ident{indexIdent},
-					Type:  ast.NewIdent("int"),
-				},
-			}},
-			Results: &ast.FieldList{List: resultTypes},
-		},
-		Recv: gen.receiverFieldList(),
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			callMutex(method, "RLock"),
-			deferMutex(method, "RUnlock"),
-			&ast.ReturnStmt{
-				Results: resultValues,
-			},
-		}},
-	}
-}
-
-func (gen CodeGenerator) methodReturnsSetter(method *ast.Field) *ast.FuncDecl {
-	methodType := method.Type.(*ast.FuncType)
-
-	params := []*ast.Field{}
-	structFields := []ast.Expr{}
-	eachMethodResult(methodType, func(name string, t ast.Expr) {
-		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(name)},
-			Type:  t,
-		})
-
-		structFields = append(structFields, ast.NewIdent(name))
-	})
-
-	return &ast.FuncDecl{
-		Name: ast.NewIdent(returnSetterMethodName(method)),
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{List: params},
-		},
-		Recv: gen.receiverFieldList(),
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{
-				Tok: token.ASSIGN,
-				Lhs: []ast.Expr{
-					&ast.SelectorExpr{
-						X:   receiverIdent(),
-						Sel: ast.NewIdent(methodStubFuncName(method)),
-					},
-				},
-				Rhs: []ast.Expr{
-					&ast.BasicLit{
-						Kind:  token.STRING,
-						Value: "nil",
-					},
-				},
-			},
-			&ast.AssignStmt{
-				Tok: token.ASSIGN,
-				Lhs: []ast.Expr{
-					&ast.SelectorExpr{
-						X:   receiverIdent(),
-						Sel: ast.NewIdent(returnStructFieldName(method)),
-					},
-				},
-				Rhs: []ast.Expr{
-					&ast.CompositeLit{
-						Type: returnStructTypeForMethod(methodType),
-						Elts: structFields,
-					},
-				},
-			},
 		}},
 	}
 }
@@ -390,27 +124,6 @@ func (gen CodeGenerator) receiverFieldList() *ast.FieldList {
 			{
 				Names: []*ast.Ident{receiverIdent()},
 				Type:  &ast.StarExpr{X: ast.NewIdent(gen.StructName)},
-			},
-		},
-	}
-}
-
-func (gen CodeGenerator) ensureInterfaceIsUsed() *ast.GenDecl {
-	return &ast.GenDecl{
-		Tok: token.VAR,
-		Specs: []ast.Spec{
-			&ast.ValueSpec{
-				Names: []*ast.Ident{ast.NewIdent("_")},
-				Type: &ast.SelectorExpr{
-					X:   ast.NewIdent(gen.Model.PackageName),
-					Sel: ast.NewIdent(gen.Model.Name),
-				},
-				Values: []ast.Expr{
-					&ast.CallExpr{
-						Fun:  ast.NewIdent("new"),
-						Args: []ast.Expr{ast.NewIdent(gen.StructName)},
-					},
-				},
 			},
 		},
 	}

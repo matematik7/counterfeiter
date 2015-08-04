@@ -4,7 +4,7 @@ package fakes
 import (
 	"sync"
 
-	"github.com/maxbrunsfeld/counterfeiter/fixtures/aliased_package"
+	"github.com/matematik7/counterfeiter/fixtures/aliased_package"
 )
 
 type FakeInAliasedPackage struct {

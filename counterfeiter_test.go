@@ -3,8 +3,8 @@ package main_test
 import (
 	"errors"
 
-	"github.com/maxbrunsfeld/counterfeiter/fixtures"
-	"github.com/maxbrunsfeld/counterfeiter/fixtures/fakes"
+	"github.com/matematik7/counterfeiter/fixtures"
+	"github.com/matematik7/counterfeiter/fixtures/fakes"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

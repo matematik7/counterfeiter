@@ -4,7 +4,7 @@ package fakes
 import (
 	"sync"
 
-	"github.com/maxbrunsfeld/counterfeiter/fixtures"
+	"github.com/matematik7/counterfeiter/fixtures"
 )
 
 type FakeHasVarArgsWithLocalTypes struct {

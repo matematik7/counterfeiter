@@ -7,7 +7,7 @@ import (
 	some_alias "os"
 	"sync"
 
-	"github.com/maxbrunsfeld/counterfeiter/fixtures"
+	"github.com/matematik7/counterfeiter/fixtures"
 )
 
 type FakeHasImports struct {

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/maxbrunsfeld/counterfeiter/fixtures"
-	"github.com/maxbrunsfeld/counterfeiter/fixtures/another_package"
+	"github.com/matematik7/counterfeiter/fixtures"
+	"github.com/matematik7/counterfeiter/fixtures/another_package"
 )
 
 type FakeEmbedsInterfaces struct {

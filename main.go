@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/maxbrunsfeld/counterfeiter/generator"
-	"github.com/maxbrunsfeld/counterfeiter/locator"
+	"github.com/matematik7/counterfeiter/generator"
+	"github.com/matematik7/counterfeiter/locator"
 )
 
 var usage = `
